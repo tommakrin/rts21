@@ -167,7 +167,6 @@ static void workload(int tid)
 
 	while (1)
 	{
-		trace_write("YAYYYYY %d", tid);
 		long micro_ct = getMicroTime(&ct);
 		long micro_work = getMicroTime(&workTimer);
 		long micro_slot = getMicroTime(&slotTimer);
@@ -185,7 +184,7 @@ static void workload(int tid)
 		// Check the RR timeslot. Sa
 		if (inputpolicy == SCHED_RR && ((micro_ct - micro_slot) >= DEFAULT_RR_LOOP_TIME))
 		{
-			trace_write("RTS_Thread_%d RR Slot: %d", tid, counter++);
+			//trace_write("RTS_Thread_%d RR Slot: %d", tid, counter++);
 			slotTimer.tv_sec = ct.tv_sec;
 			slotTimer.tv_nsec = ct.tv_nsec;
 		}

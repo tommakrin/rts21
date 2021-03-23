@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 
 #include "helpers.h"
+#include <stdbool.h>
 
 #define NUM_THREADS 3
 #define HIGHEST_PRIORITY 99
@@ -40,10 +41,24 @@ struct thread_args
 	unsigned long long thread_end_timestamp;
 	double thread_exectime;
 	long long thread_deadline;
+	bool deadline_miss;
+	long long thread_response_time;
+};
+
+struct runtime_data
+{
+	unsigned int thread_number;
+	struct timespec thread_start_time;
+	struct timespec thread_end_time;
+	unsigned long long thread_end_timestamp;
+	double thread_exectime;
+	long long thread_deadline;
+	bool deadline_miss;
 	long long thread_response_time;
 };
 
 static struct thread_args results[NUM_THREADS];
+static struct thread_args export[5000]; // NOT A DYNAMIC ARRAY. PROGRAM SHOULDN'T RUN FOR TOO LONG!!!!
 typedef void *(*thread_func_prototype)(void *);
 
 /*<======== This is where you have to work =========>*/
@@ -52,11 +67,7 @@ static void *Thread(void *inArgs)
 	long long thread_response_time = 0;
 
 	/* <==================== ADD CODE BELOW =======================>*/
-	/* Follow the instruction manual for creating a periodic task here
-	 * The given code snippet of this thread is one shot, which means that
-	 * it will execute once and exit. However, in real-time systems, a thread
-	 * is normally periodic. You can also check the deadline miss of a thread
-	 * following the same tutorial. Use the given clock_gettime() examples to
+	/* Use the given clock_gettime() examples to
 	 * find out the response_time of the threads. For calculating the next
 	 * period of the thread use the period value given in thread_args struct.
 	 */
@@ -68,8 +79,9 @@ static void *Thread(void *inArgs)
 	int tid = args->thread_number;
 	int period = args->thread_period;
 
-	struct timespec next;
 	struct timespec now;
+	struct timespec next;
+	struct timespec prev;
 
 	trace_write("RTS_Thread_%d Policy:%s Priority:%d\n", /*This is an example trace message which appears at the start of the thread in KernelShark */
 				args->thread_number, POL_TO_STR(args->thread_policy), args->thread_priority);
@@ -79,22 +91,31 @@ static void *Thread(void *inArgs)
 
 	while (1)
 	{
-		// Define next arrival
+		// Define next arrival.
 		clock_gettime(CLOCK_REALTIME, &now);
-		//trace_write("Current clock event: %ld.%ld", now.tv_sec, now.tv_nsec);
+		prev = next; // Save previous value of next, in order to calculate deadline miss
 		timespec_add_us(&next, period * 1000);
-		//trace_write("Next clock event: %ld.%ld", next.tv_sec, next.tv_nsec);
+
+		// Check for deadline miss
+		if (timespec_cmp(&now, &prev) > 0)
+		{
+			fprintf(stderr, "Deadline miss for thread %d\n", tid);
+			fprintf(stderr, "now: %d sec %ld nsec next: %d sec %ldnsec \n",
+					now.tv_sec, now.tv_nsec, prev.tv_sec, prev.tv_nsec);
+
+			exit(-1);
+		}
 
 		// Stop. Hammertime.
-		trace_write("SUSPENDING!: Thread_%d", tid);
+		// trace_write("SUSPENDING!: Thread_%d", tid);
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
 		trace_write("WAKE: Thread_%d", tid);
 
-		trace_write("RELEASE: Thread_%d", tid);
+		// trace_write("RELEASE: Thread_%d", tid);
 		// Perform workload
 		workload(args->thread_number); // This produces a busy wait loop of ~5+/-100us milliseconds
 
-		trace_write("FINISH: Thread_%d", tid);
+		// trace_write("FINISH: Thread_%d", tid);
 	}
 
 	/* In order to change the execution time (busy wait loop) of this thread
@@ -235,7 +256,7 @@ int main(int argc, char **argv)
 		printf("Successfully opened trace_marker\n");
 	}
 
-	trace_write("JATW_1");
+	//trace_write("JATW_1");
 
 	if ((set_attributes(priorities, NUM_THREADS, affinities, policies, attributes) == FALSE))
 	{
@@ -263,7 +284,7 @@ int main(int argc, char **argv)
 		pthread_join(thread_id[i], NULL);
 	}
 
-	trace_write("JATW_2");
+	//trace_write("JATW_2");
 
 	qsort(results, NUM_THREADS, sizeof(struct thread_args), comparator);
 
