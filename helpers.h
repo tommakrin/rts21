@@ -28,6 +28,21 @@
 static int trace_fd = -1;
 static int inputpolicy = 0;
 
+struct thread_args
+{
+	unsigned int thread_period;
+	unsigned int thread_priority;
+	unsigned int thread_policy;
+	unsigned int thread_affinity;
+	unsigned int thread_number;
+	struct timespec thread_start_time;
+	struct timespec thread_end_time;
+	unsigned long long thread_end_timestamp;
+	double thread_exectime;
+	struct timespec thread_deadline;
+	struct timespec thread_response_time;
+};
+
 /*<======== Do not change anything in this function =========>*/
 static void timespec_add_us(struct timespec *t, long us)
 {
@@ -76,7 +91,7 @@ static long clock_diff(struct timespec start, struct timespec end)
 }
 
 /// Returns the time stored by a timespec struct in the form of microseconds
-static long getMicroTime(struct timespec* t)
+static long getMicroTime(struct timespec *t)
 {
 	long micro;
 	micro = (t->tv_sec * MICRO_SECOND_MULTIPLIER + t->tv_nsec / 1000);
@@ -151,6 +166,22 @@ static void trace_write(const char *fmt, ...)
 	write(trace_fd, buf, n);
 }
 
+static void logger(struct thread_args* t)
+{
+	FILE *pFile;
+
+	pFile = fopen("stats.log", "a");
+	if (pFile == NULL)
+	{
+		perror("Error opening file.");
+	}
+	else
+	{
+		fprintf(pFile, "%d; %ld; %ld; %ld;\n ", t->thread_number, getMicroTime(&t->thread_start_time), getMicroTime(&t->thread_end_time), getMicroTime(&t->thread_deadline) );
+	}
+	fclose(pFile);
+}
+
 /*<======== Do not change anything in this function =========>*/
 static void workload(int tid)
 {
@@ -170,7 +201,7 @@ static void workload(int tid)
 		long micro_ct = getMicroTime(&ct);
 		long micro_work = getMicroTime(&workTimer);
 		long micro_slot = getMicroTime(&slotTimer);
-		
+
 		if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ct) != 0)
 		{
 			fprintf(stderr, "%s\n", "Error Fetching Clock Start Time.");
@@ -181,10 +212,9 @@ static void workload(int tid)
 		if (micro_ct - micro_work >= DEFAULT_BUSY_WAIT_TIME)
 			break;
 
-		// Check the RR timeslot. Sa
+		// Check the RR timeslot.
 		if (inputpolicy == SCHED_RR && ((micro_ct - micro_slot) >= DEFAULT_RR_LOOP_TIME))
 		{
-			//trace_write("RTS_Thread_%d RR Slot: %d", tid, counter++);
 			slotTimer.tv_sec = ct.tv_sec;
 			slotTimer.tv_nsec = ct.tv_nsec;
 		}

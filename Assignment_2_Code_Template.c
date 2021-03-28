@@ -29,48 +29,13 @@
 #define DEFAULT_RR_LOOP_TIME 1000	// 1 Millisecond
 #define MICRO_SECOND_MULTIPLIER 1000000
 
-struct thread_args
-{
-	unsigned int thread_period;
-	unsigned int thread_priority;
-	unsigned int thread_policy;
-	unsigned int thread_affinity;
-	unsigned int thread_number;
-	struct timespec thread_start_time;
-	struct timespec thread_end_time;
-	unsigned long long thread_end_timestamp;
-	double thread_exectime;
-	long long thread_deadline;
-	bool deadline_miss;
-	long long thread_response_time;
-};
-
-struct runtime_data
-{
-	unsigned int thread_number;
-	struct timespec thread_start_time;
-	struct timespec thread_end_time;
-	unsigned long long thread_end_timestamp;
-	double thread_exectime;
-	long long thread_deadline;
-	bool deadline_miss;
-	long long thread_response_time;
-};
-
 static struct thread_args results[NUM_THREADS];
-static struct thread_args export[5000]; // NOT A DYNAMIC ARRAY. PROGRAM SHOULDN'T RUN FOR TOO LONG!!!!
 typedef void *(*thread_func_prototype)(void *);
 
 /*<======== This is where you have to work =========>*/
 static void *Thread(void *inArgs)
 {
 	long long thread_response_time = 0;
-
-	/* <==================== ADD CODE BELOW =======================>*/
-	/* Use the given clock_gettime() examples to
-	 * find out the response_time of the threads. For calculating the next
-	 * period of the thread use the period value given in thread_args struct.
-	 */
 
 	/*This fetches the thread control block (thread_args) passed to the thread at the time of creation*/
 	struct thread_args *args = (struct thread_args *)inArgs;
@@ -82,12 +47,16 @@ static void *Thread(void *inArgs)
 	struct timespec now;
 	struct timespec next;
 	struct timespec prev;
+	struct timespec dead;
+	char line[256];
 
 	trace_write("RTS_Thread_%d Policy:%s Priority:%d\n", /*This is an example trace message which appears at the start of the thread in KernelShark */
 				args->thread_number, POL_TO_STR(args->thread_policy), args->thread_priority);
 
 	clock_gettime(CLOCK_REALTIME, &results[tid].thread_start_time); // This fetches the timespec structure through which can get current time.
-	next = results[tid].thread_start_time;							// Init first next time to thread start time
+	// Initialize next release
+	next = results[tid].thread_start_time;
+	timespec_add_us(&next, period * 1000);
 
 	while (1)
 	{
@@ -96,26 +65,26 @@ static void *Thread(void *inArgs)
 		prev = next; // Save previous value of next, in order to calculate deadline miss
 		timespec_add_us(&next, period * 1000);
 
-		// Check for deadline miss
+		// In case of deadline, abort, otherwise run
 		if (timespec_cmp(&now, &prev) > 0)
 		{
-			fprintf(stderr, "Deadline miss for thread %d\n", tid);
-			fprintf(stderr, "now: %d sec %ld nsec next: %d sec %ldnsec \n",
-					now.tv_sec, now.tv_nsec, prev.tv_sec, prev.tv_nsec);
-
-			exit(-1);
+			trace_write("Thread %d MISSED the deadline!", tid);
+			// break;
+		}
+		else
+		{
+			clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &prev, NULL);
+			trace_write("WAKE: Thread_%d", tid);
+			workload(args->thread_number); // This produces a busy wait loop of ~5+/-100us milliseconds
 		}
 
-		// Stop. Hammertime.
-		// trace_write("SUSPENDING!: Thread_%d", tid);
-		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
-		trace_write("WAKE: Thread_%d", tid);
+		results[tid].thread_number = args->thread_number;
+		results[tid].thread_start_time = prev;
+		clock_gettime(CLOCK_REALTIME, &results[tid].thread_end_time);
+		results[tid].thread_deadline = prev;
+		timespec_add_us(&results[tid].thread_deadline, period * 1000);
 
-		// trace_write("RELEASE: Thread_%d", tid);
-		// Perform workload
-		workload(args->thread_number); // This produces a busy wait loop of ~5+/-100us milliseconds
-
-		// trace_write("FINISH: Thread_%d", tid);
+		logger(&results[tid]);
 	}
 
 	/* In order to change the execution time (busy wait loop) of this thread
@@ -125,8 +94,6 @@ static void *Thread(void *inArgs)
 	clock_gettime(CLOCK_REALTIME, &results[tid].thread_end_time);
 
 	/* Following sequence of commented instructions should be filled at the end of each periodic iteration*/
-	// results[tid].thread_deadline 		= <Fill with the next calculated deadline>;
-	// results[tid].thread_response_time 	= <Fill with the response_time>;
 
 	/* Do not change the below sequence of instructions.*/
 	results[tid].thread_number = args->thread_number;
@@ -176,8 +143,10 @@ int main(int argc, char **argv)
 	 * If you do not have a multicore computer, then change the value of affinities[i] from 1 to 0.
 	 */
 
-	int priorities[NUM_THREADS] = {95, 50, 25}; /* Priorities are in the range from 1 to 99 when it comes to SCHED_FIFO and SCHED_RR, and for  
-	SCHED_OTHER, the priority is always 0 */
+	// Priorities are 0 in SCHED_OTHER and 1-99 for other policies
+
+	// int priorities[NUM_THREADS] = {95, 50, 25}; 
+	int priorities[NUM_THREADS] = {0, 0, 0}; 
 
 	int periods[NUM_THREADS] = {10, 20, 30}; // Used in calculation of next period value in a periodic task / thread.
 
